@@ -91,7 +91,7 @@ Proof.
     auto.
 Qed.
 
-Inductive LangF (X: Set) :=
+Inductive LangF (X: Type) :=
 | emptyF
 | epsF
 | charF (c: ascii)
@@ -359,60 +359,84 @@ Proof.
   - simpl. rewrite map_idx. rewrite IHi. reflexivity.
 Qed.
 
-Definition DGDec (ctx: Ctx) (g: CDG ctx) n : Set :=
-  reflect (Delta (Denotation {| ctx := ctx; idx := n |})) g[@n].
+Lemma const_idx {A} (x: A) n : forall i, (const x n)[@i] = x.
+Proof.
+  intros i. induction i.
+  - reflexivity.
+  - simpl. exact IHi.
+Qed.
 
-Definition DGStepPre (ctx: Ctx) (prev: CDG ctx) n : Set :=
-  match ctx.(langs)[@n] with
-  | catF l r => DGDec ctx prev l * DGDec ctx prev r
-  | altF l r => DGDec ctx prev l * DGDec ctx prev r
+Inductive DeltaF (ctx: Ctx)
+  (P: LangF (Fin.t ctx.(len)) -> Prop) :
+  LangF (Fin.t ctx.(len)) -> Prop :=
+| DF_eps : DeltaF ctx P epsF
+| DF_cat : forall l r,
+    P ctx.(langs)[@l] ->
+    P ctx.(langs)[@r] ->
+    DeltaF ctx P (catF l r)
+| DF_alt1 : forall l r,
+    P ctx.(langs)[@l] ->
+    DeltaF ctx P (altF l r)
+| DF_alt2 : forall l r,
+    P ctx.(langs)[@r] ->
+    DeltaF ctx P (altF l r)
+| DF_rep : forall l,
+    DeltaF ctx P (repF l).
+
+Fixpoint DeltaN (ctx: Ctx) n : LangF (Fin.t ctx.(len)) -> Prop :=
+  match n with
+  | 0 => fun l => False
+  | S n' => fun l => DeltaF ctx (DeltaN ctx n') l
+  end.
+
+Definition DGReflect (ctx: Ctx) (g: CDG ctx) n i : Set :=
+  reflect (DeltaN _ n ctx.(langs)[@i]) g[@i].
+
+Definition DGStepPre (ctx: Ctx) (prev: CDG ctx) n i : Set :=
+  match ctx.(langs)[@i] with
+  | catF l r => DGReflect ctx prev n l * DGReflect ctx prev n r
+  | altF l r => DGReflect ctx prev n l * DGReflect ctx prev n r
   | _ => True
   end.
 
-(* this is the wrong thing to prove... what's needed is
-   a proof that dgstep computes a decision for the functor
-   DeltaF underlying Delta, and that
-
-     Delta (Denotation l) <-> Fix l.ctx.len DeltaF
-
-   where Fix 0 F = Void; Fix (S n) F = F (Fix n F)
- *)
-Theorem DGStepCorrect (ctx: Ctx) (prev: CDG ctx) : forall n,
-  DGStepPre ctx prev n ->
-  DGDec ctx (dgstep ctx prev) n.
+Theorem DGStepCorrect (ctx: Ctx) (prev: CDG ctx) : forall n i,
+    DGStepPre ctx prev n i ->
+    DGReflect ctx (dgstep ctx prev) (S n) i.
 Proof.
-  intros n Hpre.
+  intros n i Hpre.
   unfold DGStepPre in Hpre.
-  unfold dgstep, DGDec.
+  unfold dgstep, DGReflect.
   rewrite map_idx. rewrite indexes_idx.
-  rewrite (LangDecompose (Denotation _)).
-  unfold Denotation, LangDecomp.
-  fold Denotation.
-  unfold get_lang.
-  replace ((langs (derp.ctx {| ctx := ctx; idx := n |}))
-             [@idx {| ctx := ctx; idx := n |}])
-    with ctx.(langs)[@n].
-  destruct ctx.(langs)[@n] eqn:E.
+  destruct ctx.(langs)[@i] eqn:E.
   - apply ReflectF. intros Contra. inversion Contra.
-  - apply ReflectT. apply DL_eps.
+  - apply ReflectT. apply DF_eps.
   - apply ReflectF. intros Contra. inversion Contra.
-  - unfold DGDec in Hpre.
+  - unfold DGReflect in Hpre. simpl.
     destruct Hpre as [Hl Hr]. destruct Hl.
     + destruct Hr.
-      * apply ReflectT. apply DL_cat; assumption.
+      * apply ReflectT. apply DF_cat; assumption.
       * apply ReflectF. intros Contra.
         inversion Contra; contradiction.
     + apply ReflectF. intros Contra.
       inversion Contra; contradiction.
-  - unfold DGDec in Hpre.
+  - unfold DGReflect in Hpre. simpl.
     destruct Hpre as [Hl Hr]. destruct Hl.
-    + apply ReflectT. apply DL_alt1; assumption.
+    + apply ReflectT. apply DF_alt1; assumption.
     + destruct Hr.
-      * apply ReflectT. apply DL_alt2; assumption.
+      * apply ReflectT. apply DF_alt2; assumption.
       * apply ReflectF. intros Contra.
         inversion Contra; contradiction.
-  - apply ReflectT. apply DL_rep.
-  - reflexivity.
+  - apply ReflectT. apply DF_rep.
+Qed.
+
+Theorem DGIterCorrect (ctx: Ctx) (prev: CDG ctx) : forall n i,
+    DGReflect ctx (dgiter ctx n) n i.
+Proof.
+  intros n. induction n; intros i.
+  - simpl. unfold DGReflect, DeltaN, DGBottom.
+    rewrite const_idx. apply ReflectF. auto.
+  - apply DGStepCorrect. unfold DGStepPre.
+    destruct ctx.(langs)[@i]; auto.
 Qed.
 
 Lemma andb_monotone : forall a b c d,
