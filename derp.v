@@ -274,7 +274,7 @@ Definition CDG (ctx: Ctx) := DeltaGraph ctx.(len).
 
 Definition dgstep (ctx: Ctx) (prev: CDG ctx) : CDG ctx :=
   let next n :=
-    match (ctx.(langs)[@n]) with
+    match ctx.(langs)[@n] with
     | emptyF => false
     | epsF => true
     | charF _ => false
@@ -357,6 +357,62 @@ Proof.
   intros i. induction i.
   - reflexivity.
   - simpl. rewrite map_idx. rewrite IHi. reflexivity.
+Qed.
+
+Definition DGDec (ctx: Ctx) (g: CDG ctx) n : Set :=
+  reflect (Delta (Denotation {| ctx := ctx; idx := n |})) g[@n].
+
+Definition DGStepPre (ctx: Ctx) (prev: CDG ctx) n : Set :=
+  match ctx.(langs)[@n] with
+  | catF l r => DGDec ctx prev l * DGDec ctx prev r
+  | altF l r => DGDec ctx prev l * DGDec ctx prev r
+  | _ => True
+  end.
+
+(* this is the wrong thing to prove... what's needed is
+   a proof that dgstep computes a decision for the functor
+   DeltaF underlying Delta, and that
+
+     Delta (Denotation l) <-> Fix l.ctx.len DeltaF
+
+   where Fix 0 F = Void; Fix (S n) F = F (Fix n F)
+ *)
+Theorem DGStepCorrect (ctx: Ctx) (prev: CDG ctx) : forall n,
+  DGStepPre ctx prev n ->
+  DGDec ctx (dgstep ctx prev) n.
+Proof.
+  intros n Hpre.
+  unfold DGStepPre in Hpre.
+  unfold dgstep, DGDec.
+  rewrite map_idx. rewrite indexes_idx.
+  rewrite (LangDecompose (Denotation _)).
+  unfold Denotation, LangDecomp.
+  fold Denotation.
+  unfold get_lang.
+  replace ((langs (derp.ctx {| ctx := ctx; idx := n |}))
+             [@idx {| ctx := ctx; idx := n |}])
+    with ctx.(langs)[@n].
+  destruct ctx.(langs)[@n] eqn:E.
+  - apply ReflectF. intros Contra. inversion Contra.
+  - apply ReflectT. apply DL_eps.
+  - apply ReflectF. intros Contra. inversion Contra.
+  - unfold DGDec in Hpre.
+    destruct Hpre as [Hl Hr]. destruct Hl.
+    + destruct Hr.
+      * apply ReflectT. apply DL_cat; assumption.
+      * apply ReflectF. intros Contra.
+        inversion Contra; contradiction.
+    + apply ReflectF. intros Contra.
+      inversion Contra; contradiction.
+  - unfold DGDec in Hpre.
+    destruct Hpre as [Hl Hr]. destruct Hl.
+    + apply ReflectT. apply DL_alt1; assumption.
+    + destruct Hr.
+      * apply ReflectT. apply DL_alt2; assumption.
+      * apply ReflectF. intros Contra.
+        inversion Contra; contradiction.
+  - apply ReflectT. apply DL_rep.
+  - reflexivity.
 Qed.
 
 Lemma andb_monotone : forall a b c d,
