@@ -132,6 +132,9 @@ Definition DGLess n (g1 g2: DeltaGraph n) :=
 Definition DGBottom n : DeltaGraph n :=
   const false _.
 
+Definition DGTop n : DeltaGraph n :=
+  const true _.
+
 Theorem DGLess_refl : forall n (g: DeltaGraph n),
     Forall2 (fun x1 x2 => x1 <= x2) g g.
 Proof.
@@ -286,6 +289,9 @@ Lemma nth_S {A n h} {t: Vector.t A n} : forall i,
     (h :: t)[@Fin.FS i] = t[@i].
 Proof. intros. simpl. reflexivity. Qed.
 
+Theorem is_nil {A} (l: Vector.t A 0) : l = nil _.
+Proof. apply case0 with (v := l). reflexivity. Qed.
+
 Theorem is_cons {A n} (l: Vector.t A (S n)) :
   exists h t, l = (h :: t).
 Proof.
@@ -423,10 +429,185 @@ Proof.
     destruct ctx.(langs)[@i]; auto.
 Qed.
 
+Lemma andb_monotone : forall a b c d,
+    a <= c -> b <= d -> a && b <= c && d.
+Proof.
+  intros a b c d H1 H2.
+  destruct a; destruct b; destruct c; destruct d;
+    simpl in *; auto.
+Qed.
+
+Lemma orb_monotone : forall a b c d,
+    a <= c -> b <= d -> a || b <= c || d.
+Proof.
+  intros a b c d H1 H2.
+  destruct a; destruct b; destruct c; destruct d;
+    simpl in *; auto.
+Qed.
+
+Theorem dgiter_monotone (ctx: Ctx) : forall n,
+    DGLess _ (dgiter ctx n) (dgiter ctx (S n)).
+Proof with (repeat rewrite map_idx in *;
+            repeat rewrite indexes_idx in *).
+  unfold DGLess. intros n. induction n.
+  - simpl. apply DGBottom_bottom. apply I.
+  - simpl. apply Forall2_indexes. intros i.
+    unfold dgstep...
+    destruct (langs ctx)[@i]; try apply le_refl...
+    + set (proj2 Forall2_indexes IHn) as IH. simpl in IH.
+      apply andb_monotone.
+      * specialize (IH l). unfold dgstep in IH... apply IH.
+      * specialize (IH r). unfold dgstep in IH... apply IH.
+    + set (proj2 Forall2_indexes IHn) as IH. simpl in IH.
+      apply orb_monotone.
+      * specialize (IH l). unfold dgstep in IH... apply IH.
+      * specialize (IH r). unfold dgstep in IH... apply IH.
+Qed.
+
+Fixpoint popcount {n} (g: DeltaGraph n) : nat :=
+  match g with
+  | nil _ => 0
+  | cons _ true _ t => S (popcount t)
+  | cons _ false _ t => popcount t
+  end.
+
+Theorem popcount_max {n} (g: DeltaGraph n) :
+  (popcount g <= n)%nat.
+Admitted.
+
+Theorem popcount_top {n} (g: DeltaGraph n) :
+  (popcount g = n) -> g = DGTop n.
+Admitted.
+
+Definition dg_eq_dec {n} (g1 g2: DeltaGraph n) :
+  {g1 = g2} + {g1 <> g2} :=
+  eq_dec _ Bool.eqb eqb_true_iff _ g1 g2.
+
+Lemma eq_index {A} {n} (v1 v2: Vector.t A n) :
+  (forall i, v1[@i] = v2[@i]) <-> v1 = v2.
+Proof.
+  split.
+  - generalize dependent n. induction n; intros.
+    + apply case0 with (v := v1).
+      apply case0 with (v := v2).
+      reflexivity.
+    + destruct (is_cons v1) as [h1 [t1 E1]]. rewrite E1 in *.
+      destruct (is_cons v2) as [h2 [t2 E2]]. rewrite E2 in *.
+      f_equal.
+      * apply (H Fin.F1).
+      * apply IHn. intros i. apply (H (Fin.FS i)).
+  - intros H i. rewrite H. reflexivity.
+Qed.
+
+Lemma DGPopcount : forall n (g1 g2: DeltaGraph n) pc,
+  popcount g1 >= pc ->
+  DGLess _ g1 g2 ->
+  g1 <> g2 ->
+  popcount g2 >= S pc.
+Proof.
+  intros n. induction n; intros.
+  - rewrite (is_nil g1) in *. rewrite (is_nil g2) in *.
+    exfalso. apply H1. reflexivity.
+  - destruct (is_cons g1) as [h1 [t1 E1]]. rewrite E1 in *.
+    destruct (is_cons g2) as [h2 [t2 E2]]. rewrite E2 in *.
+    destruct (forall_uncons H0).
+    destruct h1; destruct h2.
+    + apply le_n_S. destruct pc.
+      * apply le_0_n.
+      * apply (IHn t1 t2).
+        -- apply le_S_n. apply H.
+        -- unfold DGLess in *. assumption.
+        -- intros Contra. apply H1. f_equal. apply Contra.
+    + unfold DGLess in *.
+      inversion H2.
+    + simpl in H. destruct (dg_eq_dec t1 t2).
+      * apply le_n_S. rewrite e in H. apply H.
+      * apply le_S. apply (IHn t1 t2).
+        -- apply H.
+        -- apply H3.
+        -- apply n0.
+    + apply (IHn t1 t2).
+      -- apply H.
+      -- apply H3.
+      -- intros Contra. rewrite Contra in H1.
+         apply H1. reflexivity.
+Qed.
+
+Lemma DGStepPopcount (ctx: Ctx) : forall n pc,
+  popcount (dgiter ctx n) >= pc ->
+  dgiter ctx n <> dgiter ctx (S n) ->
+  popcount (dgiter ctx (S n)) >= S pc.
+Proof.
+  intros. apply (DGPopcount _ (dgiter ctx n) (dgiter ctx (S n))).
+  - assumption.
+  - apply dgiter_monotone.
+  - assumption.
+Qed.
+
+Theorem DGIterPopcount (ctx : Ctx) : forall n,
+    popcount (dgiter ctx n) >= n
+    \/ dgiter ctx n = dgiter ctx (S n).
+Proof.
+  intros n. induction n.
+  - simpl. left. apply le_0_n.
+  - inversion IHn; subst.
+    + destruct (dg_eq_dec (dgiter ctx n) (dgiter ctx (S n))).
+      * right. unfold dgiter. f_equal. fold dgiter. apply e.
+      * left. apply DGStepPopcount; assumption.
+    + right. unfold dgiter. f_equal. fold dgiter. apply H.
+Qed.
+
+Theorem DGStepTop (ctx: Ctx) : forall g,
+    dgstep ctx g = DGTop (len ctx) ->
+    dgstep ctx (DGTop (len ctx)) = DGTop (len ctx).
+Proof.
+  intros. apply eq_index. intros i.
+  set (proj2 (eq_index _ _) H i) as Hprev.
+  unfold DGTop in *. repeat rewrite const_idx in *.
+  unfold dgstep in *. repeat rewrite map_idx in *.
+  repeat rewrite indexes_idx in *.
+  destruct (langs ctx)[@i]; try discriminate; try reflexivity.
+  - repeat rewrite const_idx. reflexivity.
+  - repeat rewrite const_idx. reflexivity.
+Qed.
+
+Theorem DGIterTop (ctx: Ctx) : forall n,
+    dgiter ctx n = DGTop (len ctx) ->
+    dgstep ctx (DGTop (len ctx)) = DGTop (len ctx).
+Proof.
+  destruct ctx. generalize dependent langs0.
+  destruct len0; intros; simpl in *.
+  - reflexivity.
+  - destruct n; simpl in *.
+    + inversion H.
+    + apply (DGStepTop _ _ H).
+Qed.
+
+Theorem DGIterFixpoint' (ctx : Ctx) :
+    dgiter ctx ctx.(len) = dgiter ctx (S ctx.(len)).
+Proof.
+  destruct (DGIterPopcount ctx ctx.(len)).
+  - assert (popcount (dgiter ctx ctx.(len)) = ctx.(len)). {
+      apply Nat.le_antisymm.
+      - apply popcount_max.
+      - apply H. }
+    set (popcount_top _ H0) as Htop.
+    change (dgiter ctx (S (len ctx))) with
+      (dgstep ctx (dgiter ctx (len ctx))).
+    rewrite Htop. symmetry. apply (DGIterTop _ _ Htop).
+  - assumption.
+Qed.
+
 Theorem DGIterFixpoint (ctx : Ctx) : forall n,
     (ctx.(len) < n)%nat ->
     dgiter ctx ctx.(len) = dgiter ctx n.
-Admitted.
+Proof.
+  intros. induction H.
+  - apply DGIterFixpoint'.
+  - change (dgiter ctx (S m)) with (dgstep ctx (dgiter ctx m)).
+    rewrite <- IHle. rewrite DGIterFixpoint' at 1.
+    reflexivity.
+Qed.
 
 Theorem DeltaNDenotation1 (ctx: Ctx) : forall n i,
     DeltaN ctx n ctx.(langs)[@i] -> Delta (Denotation ctx i).
@@ -532,41 +713,6 @@ Proof.
     apply DeltaNDenotation. assumption.
   - apply ReflectF. intros Contra. apply n.
     apply DeltaNDenotation. assumption.
-Qed.
-
-Lemma andb_monotone : forall a b c d,
-    a <= c -> b <= d -> a && b <= c && d.
-Proof.
-  intros a b c d H1 H2.
-  destruct a; destruct b; destruct c; destruct d;
-    simpl in *; auto.
-Qed.
-
-Lemma orb_monotone : forall a b c d,
-    a <= c -> b <= d -> a || b <= c || d.
-Proof.
-  intros a b c d H1 H2.
-  destruct a; destruct b; destruct c; destruct d;
-    simpl in *; auto.
-Qed.
-
-Theorem dgiter_monotone (ctx: Ctx) : forall n,
-    DGLess _ (dgiter ctx n) (dgiter ctx (S n)).
-Proof with (repeat rewrite map_idx in *;
-            repeat rewrite indexes_idx in *).
-  unfold DGLess. intros n. induction n.
-  - simpl. apply DGBottom_bottom. apply I.
-  - simpl. apply Forall2_indexes. intros i.
-    unfold dgstep...
-    destruct (langs ctx)[@i]; try apply le_refl...
-    + set (proj2 Forall2_indexes IHn) as IH. simpl in IH.
-      apply andb_monotone.
-      * specialize (IH l). unfold dgstep in IH... apply IH.
-      * specialize (IH r). unfold dgstep in IH... apply IH.
-    + set (proj2 Forall2_indexes IHn) as IH. simpl in IH.
-      apply orb_monotone.
-      * specialize (IH l). unfold dgstep in IH... apply IH.
-      * specialize (IH r). unfold dgstep in IH... apply IH.
 Qed.
 
 Section EXAMPLES.
