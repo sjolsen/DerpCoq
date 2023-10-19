@@ -473,11 +473,29 @@ Fixpoint popcount {n} (g: DeltaGraph n) : nat :=
 
 Theorem popcount_max {n} (g: DeltaGraph n) :
   (popcount g <= n)%nat.
-Admitted.
+Proof.
+  generalize dependent g.
+  induction n; intros.
+  - rewrite (is_nil g). apply le_0_n.
+  - destruct (is_cons g) as [h [t E]]. rewrite E in *.
+    simpl. destruct h.
+    + apply le_n_S. apply IHn.
+    + apply le_S. apply IHn.
+Qed.
 
 Theorem popcount_top {n} (g: DeltaGraph n) :
   (popcount g = n) -> g = DGTop n.
-Admitted.
+Proof.
+  generalize dependent g.
+  induction n; intros.
+  - rewrite (is_nil g). reflexivity.
+  - destruct (is_cons g) as [h [t E]]. rewrite E in *.
+    inversion H; subst. destruct h.
+    + unfold DGTop, const, nat_rect. f_equal.
+      apply IHn. simpl in H. injection H as H. apply H.
+    + set (popcount_max t) as Ht. rewrite H1 in Ht.
+      exfalso. apply (Nat.nle_succ_diag_l _ Ht).
+Qed.
 
 Definition dg_eq_dec {n} (g1 g2: DeltaGraph n) :
   {g1 = g2} + {g1 <> g2} :=
