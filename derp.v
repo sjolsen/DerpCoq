@@ -1,8 +1,9 @@
 From Coq Require Import Bool.
 From Coq Require Import Bool.BoolOrder.
-From Coq Require Import Vector.
+From Coq Require Import PeanoNat.
 From Coq Require Import Sets.Cpo.
 From Coq Require Import Strings.Ascii.
+From Coq Require Import Vector.
 Import Bool.BoolNotations.
 Import Vector.VectorNotations.
 
@@ -111,33 +112,16 @@ Record Ctx :=
   ; langs : Vector.t (LangF (Fin.t len)) len
   }.
 
-Record LangR :=
-  { ctx : Ctx
-  ; idx : Fin.t ctx.(len)
-  }.
+Definition Idx (ctx: Ctx) := Fin.t ctx.(len).
 
-Definition rebind (l: LangR) (i: Fin.t l.(ctx).(len)) : LangR :=
-  {| ctx := l.(ctx); idx := i |}.
-
-Definition get_lang (l1: LangR) : LangF LangR.
-Proof.
-  destruct (l1.(ctx).(langs)[@l1.(idx)]) eqn:E.
-  - exact emptyF.
-  - exact epsF.
-  - exact (charF c).
-  - exact (catF (rebind l1 l) (rebind l1 r)).
-  - exact (altF (rebind l1 l) (rebind l1 r)).
-  - exact (repF (rebind l1 l)).
-Defined.
-
-CoFixpoint Denotation (l1: LangR) : Lang :=
-  match (get_lang l1) with
+CoFixpoint Denotation (ctx: Ctx) (i: Idx ctx) : Lang :=
+  match ctx.(langs)[@i] with
   | emptyF => empty
   | epsF => eps
   | charF c => char c
-  | catF l r => cat (Denotation l) (Denotation r)
-  | altF l r => alt (Denotation l) (Denotation r)
-  | repF l => rep (Denotation l)
+  | catF l r => cat (Denotation _ l) (Denotation _ r)
+  | altF l r => alt (Denotation _ l) (Denotation _ r)
+  | repF l => rep (Denotation _ l)
   end.
 
 Definition DeltaGraph n := Vector.t bool n.
@@ -429,7 +413,7 @@ Proof.
   - apply ReflectT. apply DF_rep.
 Qed.
 
-Theorem DGIterCorrect (ctx: Ctx) (prev: CDG ctx) : forall n i,
+Theorem DGIterCorrect (ctx: Ctx) : forall n i,
     DGReflect ctx (dgiter ctx n) n i.
 Proof.
   intros n. induction n; intros i.
@@ -437,6 +421,117 @@ Proof.
     rewrite const_idx. apply ReflectF. auto.
   - apply DGStepCorrect. unfold DGStepPre.
     destruct ctx.(langs)[@i]; auto.
+Qed.
+
+Theorem DGIterFixpoint (ctx : Ctx) : forall n,
+    (ctx.(len) < n)%nat ->
+    dgiter ctx ctx.(len) = dgiter ctx n.
+Admitted.
+
+Theorem DeltaNDenotation1 (ctx: Ctx) : forall n i,
+    DeltaN ctx n ctx.(langs)[@i] -> Delta (Denotation ctx i).
+Proof.
+  intros n. induction n; intros.
+  - inversion H.
+  - rewrite (LangDecompose (Denotation _ _)); simpl.
+    simpl in H.
+    destruct ctx.(langs)[@i].
+    + inversion H.
+    + apply DL_eps.
+    + inversion H.
+    + inversion H. apply DL_cat; apply IHn; assumption.
+    + inversion H.
+      * apply DL_alt1. apply IHn. assumption.
+      * apply DL_alt2. apply IHn. assumption.
+    + apply DL_rep.
+Qed.
+
+Lemma DeltaNLift1 (ctx: Ctx) : forall n l,
+    DeltaN ctx n l -> DeltaN ctx (S n) l.
+Proof.
+  intros n. induction n; intros l H.
+  - inversion H.
+  - inversion H; subst.
+    + apply DF_eps.
+    + apply DF_cat; apply IHn; assumption.
+    + apply DF_alt1. apply IHn. assumption.
+    + apply DF_alt2. apply IHn. assumption.
+    + apply DF_rep.
+Qed.
+
+Lemma DeltaNLift (ctx: Ctx) : forall n m l,
+    (n <= m)%nat -> DeltaN ctx n l -> DeltaN ctx m l.
+Proof.
+  intros n m l Hnm H. induction Hnm.
+  - apply H.
+  - apply DeltaNLift1. apply IHHnm.
+Qed.
+
+Theorem DeltaNDenotation2Exists (ctx: Ctx) : forall i,
+    Delta (Denotation ctx i) ->
+    exists n, DeltaN ctx n ctx.(langs)[@i].
+Proof.
+  intros.
+  rewrite (LangDecompose (Denotation _ _)) in H; simpl in H.
+  match goal with
+  | _ : Delta ?x |- _ => remember x as discrim
+  end.
+  generalize dependent i.
+  induction H; intros;
+    destruct (langs ctx)[@i];
+    inversion Heqdiscrim; subst.
+  - exists 1. apply DF_eps.
+  - rewrite (LangDecompose (Denotation _ _)) in IHDelta1.
+    rewrite (LangDecompose (Denotation _ _)) in IHDelta2.
+    specialize (IHDelta1 l0 eq_refl). destruct IHDelta1 as [nl Dl].
+    specialize (IHDelta2 r0 eq_refl). destruct IHDelta2 as [nr Dr].
+    exists (S (max nl nr)). apply DF_cat.
+    + eapply DeltaNLift. apply Nat.le_max_l. apply Dl.
+    + eapply DeltaNLift. apply Nat.le_max_r. apply Dr.
+  - rewrite (LangDecompose (Denotation _ _)) in IHDelta.
+    specialize (IHDelta l0 eq_refl). destruct IHDelta as [nl Dl].
+    exists (S nl). apply DF_alt1. apply Dl.
+  - rewrite (LangDecompose (Denotation _ _)) in IHDelta.
+    specialize (IHDelta r0 eq_refl). destruct IHDelta as [nr Dr].
+    exists (S nr). apply DF_alt2. apply Dr.
+  - exists 1. apply DF_rep.
+Qed.
+
+Theorem DeltaNDenotation2 (ctx: Ctx) : forall i,
+    Delta (Denotation ctx i) ->
+    DeltaN ctx ctx.(len) ctx.(langs)[@i].
+Proof.
+  intros. destruct (DeltaNDenotation2Exists ctx i H) as [n Hn].
+  destruct (Nat.le_gt_cases n ctx.(len)).
+  - apply (DeltaNLift _ _ _ _ H0 Hn).
+  - assert ((dgiter ctx ctx.(len))[@i] = (dgiter ctx n)[@i]).
+    { rewrite (DGIterFixpoint _ _ H0). reflexivity. }
+    destruct (DGIterCorrect ctx n i); try contradiction.
+    destruct (DGIterCorrect ctx ctx.(len) i); try discriminate.
+    assumption.
+Qed.
+
+Theorem DeltaNDenotation (ctx: Ctx) : forall i,
+    DeltaN ctx ctx.(len) ctx.(langs)[@i]
+    <-> Delta (Denotation ctx i).
+Proof.
+  split; [apply DeltaNDenotation1|apply DeltaNDenotation2].
+Qed.
+
+Definition deltas (ctx: Ctx) : CDG ctx :=
+  dgiter ctx ctx.(len).
+
+Theorem DeltasCorrect (ctx: Ctx) : forall i,
+    reflect (Delta (Denotation ctx i)) (deltas ctx)[@i].
+Proof.
+  intros i.
+  set (DGIterCorrect ctx ctx.(len) i) as Hv.
+  unfold DGReflect in Hv. unfold deltas.
+  destruct Hv.
+  - apply ReflectT.
+    apply DeltaNDenotation. assumption.
+  - apply ReflectF. intros Contra. apply n.
+    apply DeltaNDenotation. assumption.
 Qed.
 
 Lemma andb_monotone : forall a b c d,
@@ -489,16 +584,16 @@ Open Scope fin_scope.
 Example LeftRecDenotation : Lang :=
   cofix L := alt (cat L (char "x")) eps.
 
-Example LeftRec : LangR :=
-  {| ctx := {| langs := [epsF; charF "x"; catF $3 $1; altF $2 $0] |}
-  ;  idx := $3
-  |}.
+Example LeftRecCtx : Ctx :=
+  {| langs := [epsF; charF "x"; catF $3 $1; altF $2 $0] |}.
 
-Example LeftRecCorrect : Bisim (Denotation LeftRec) LeftRecDenotation.
+Example LeftRec : Idx LeftRecCtx := $3.
+
+Example LeftRecCorrect : Bisim (Denotation _ LeftRec) LeftRecDenotation.
 Proof.
   cofix CH.
   rewrite (LangDecompose LeftRecDenotation).
-  repeat (rewrite (LangDecompose (Denotation _));
+  repeat (rewrite (LangDecompose (Denotation _ _));
           simpl; constructor).
   apply CH.
 Qed.
@@ -509,10 +604,10 @@ Proof.
   apply DL_alt2. apply DL_eps.
 Qed.
 
-Compute dgiter LeftRec.(ctx) 0.
-Compute dgiter LeftRec.(ctx) 1.
-Compute dgiter LeftRec.(ctx) 2.
-Compute dgiter LeftRec.(ctx) 3.
+Compute dgiter LeftRecCtx 0.
+Compute dgiter LeftRecCtx 1.
+Compute dgiter LeftRecCtx 2.
+Compute dgiter LeftRecCtx 3.
 
 Example InfiniteX : Lang :=
   cofix L := cat (char "x") L.
