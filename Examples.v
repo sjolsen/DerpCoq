@@ -1,6 +1,7 @@
 From Coq Require Import Strings.Ascii.
 
-From Derp Require Import Derp.
+From Derp Require Import Delta.
+From Derp Require Import Denotation.
 From Derp Require Import Vector.
 
 Import Vector.VectorNotations.
@@ -40,10 +41,7 @@ Proof.
   apply DL_alt2. apply DL_eps.
 Qed.
 
-Compute iter LeftRecCtx 0.
-Compute iter LeftRecCtx 1.
-Compute iter LeftRecCtx 2.
-Compute iter LeftRecCtx 3.
+Compute deltas LeftRecCtx.
 
 Example InfiniteX : Lang :=
   cofix L := cat (char "x") L.
