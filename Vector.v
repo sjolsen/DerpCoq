@@ -60,12 +60,6 @@ Proof.
   - intros H i. rewrite H. reflexivity.
 Qed.
 
-Fixpoint indexes n : t (Fin.t n) n :=
-  match n with
-  | 0 => []
-  | S n' => cons _ Fin.F1 _ (map Fin.FS (indexes n'))
-  end.
-
 Theorem map_idx {A B} {f: A -> B} {n} {l: t A n} :
   forall i, (map f l)[@i] = f l[@i].
 Proof.
@@ -74,13 +68,6 @@ Proof.
     reflexivity.
   - destruct (is_cons l) as [h [t E]]. rewrite E in *.
     simpl. apply IHi.
-Qed.
-
-Theorem indexes_idx n : forall i, (indexes n)[@i] = i.
-Proof.
-  intros i. induction i.
-  - reflexivity.
-  - simpl. rewrite map_idx. rewrite IHi. reflexivity.
 Qed.
 
 Theorem const_idx {A} (x: A) n : forall i, (const x n)[@i] = x.

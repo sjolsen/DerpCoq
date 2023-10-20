@@ -11,8 +11,8 @@ Import Vector.VectorNotations.
 Definition CDG (ctx: Ctx) := DG ctx.(len).
 
 Definition step (ctx: Ctx) (prev: CDG ctx) : CDG ctx :=
-  let next n :=
-    match ctx.(langs)[@n] with
+  let next l1 :=
+    match l1 with
     | emptyF => false
     | epsF => true
     | charF _ => false
@@ -20,7 +20,7 @@ Definition step (ctx: Ctx) (prev: CDG ctx) : CDG ctx :=
     | altF l r => prev[@l] || prev[@r]
     | repF _ => true
     end
-  in map next (indexes ctx.(len)).
+  in map next ctx.(langs).
 
 Fixpoint iter (ctx: Ctx) (n: nat) : CDG ctx :=
   match n with
@@ -92,7 +92,7 @@ Module Step.
   Proof.
     intros n i Hpre.
     unfold pre in Hpre. unfold step, post.
-    rewrite map_idx. rewrite indexes_idx.
+    rewrite map_idx.
     destruct ctx.(langs)[@i] eqn:E.
     - apply ReflectF. intros Contra. inversion Contra.
     - apply ReflectT. apply DF_eps.
@@ -123,7 +123,6 @@ Module Step.
     set (proj2 (eq_index _ _) H i) as Hprev.
     unfold DeltaGraph.top in *. repeat rewrite const_idx in *.
     unfold step in *. repeat rewrite map_idx in *.
-    repeat rewrite indexes_idx in *.
     destruct (langs ctx)[@i]; try discriminate; try reflexivity.
     - repeat rewrite const_idx. reflexivity.
     - repeat rewrite const_idx. reflexivity.
@@ -145,8 +144,7 @@ Module Iter.
 
   Theorem monotone (ctx: Ctx) : forall n,
       DeltaGraph.le (iter ctx n) (iter ctx (S n)).
-  Proof with (repeat rewrite map_idx in *;
-              repeat rewrite indexes_idx in *).
+  Proof with (repeat rewrite map_idx in *).
     unfold DeltaGraph.le. intros n. induction n.
     - simpl. apply DeltaGraph.Bottom. apply I.
     - simpl. apply Forall2_indexes. intros i.
@@ -192,7 +190,10 @@ Module Iter.
   Proof.
     destruct ctx. generalize dependent langs.
     destruct len; intros; simpl in *.
-    - reflexivity.
+    - unfold step.
+      change (Denotation.langs {| len := 0; langs := langs |})
+        with langs.
+      rewrite (is_nil langs). reflexivity.
     - destruct n; simpl in *.
       + inversion H.
       + apply (Step.top _ _ H).
